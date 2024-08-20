@@ -28,9 +28,10 @@ def get_parser(default_config_files, git_root):
         auto_env_var_prefix="AIDER_",
     )
     group = parser.add_argument_group("Main")
-    group.add_argument(
-        "files", metavar="FILE", nargs="*", help="files to edit with an LLM (optional)"
-    )
+    group.add_argument("files",
+                       metavar="FILE",
+                       nargs="*",
+                       help="files to edit with an LLM (optional)")
     group.add_argument(
         "--openai-api-key",
         metavar="OPENAI_API_KEY",
@@ -178,28 +179,30 @@ def get_parser(default_config_files, git_root):
         "--chat-mode",
         metavar="EDIT_FORMAT",
         default=None,
-        help="Specify what edit format the LLM should use (default depends on model)",
+        help=
+        "Specify what edit format the LLM should use (default depends on model)",
     )
     group.add_argument(
         "--weak-model",
         metavar="WEAK_MODEL",
         default=None,
-        help=(
-            "Specify the model to use for commit messages and chat history summarization (default"
-            " depends on --model)"
-        ),
+        help=
+        ("Specify the model to use for commit messages and chat history summarization (default"
+         " depends on --model)"),
     )
     group.add_argument(
         "--show-model-warnings",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Only work with models that have meta-data available (default: True)",
+        help=
+        "Only work with models that have meta-data available (default: True)",
     )
     group.add_argument(
         "--map-tokens",
         type=int,
         default=None,
-        help="Max number of tokens to use for repo map, use 0 to disable (default: 1024)",
+        help=
+        "Max number of tokens to use for repo map, use 0 to disable (default: 1024)",
     )
     group.add_argument(
         "--map-refresh",
@@ -217,10 +220,9 @@ def get_parser(default_config_files, git_root):
         "--max-chat-history-tokens",
         type=int,
         default=None,
-        help=(
-            "Maximum number of tokens to use for chat history. If not specified, uses the model's"
-            " max_chat_history_tokens."
-        ),
+        help=
+        ("Maximum number of tokens to use for chat history. If not specified, uses the model's"
+         " max_chat_history_tokens."),
     )
     # This is a duplicate of the argument in the preparser and is a no-op by this time of
     # argument parsing, but it's here so that the help is displayed as expected.
@@ -233,23 +235,25 @@ def get_parser(default_config_files, git_root):
 
     ##########
     group = parser.add_argument_group("History Files")
-    default_input_history_file = (
-        os.path.join(git_root, ".aider.input.history") if git_root else ".aider.input.history"
-    )
-    default_chat_history_file = (
-        os.path.join(git_root, ".aider.chat.history.md") if git_root else ".aider.chat.history.md"
-    )
+    default_input_history_file = (os.path.join(git_root,
+                                               ".aider.input.history")
+                                  if git_root else ".aider.input.history")
+    default_chat_history_file = (os.path.join(git_root,
+                                              ".aider.chat.history.md")
+                                 if git_root else ".aider.chat.history.md")
     group.add_argument(
         "--input-history-file",
         metavar="INPUT_HISTORY_FILE",
         default=default_input_history_file,
-        help=f"Specify the chat input history file (default: {default_input_history_file})",
+        help=
+        f"Specify the chat input history file (default: {default_input_history_file})",
     )
     group.add_argument(
         "--chat-history-file",
         metavar="CHAT_HISTORY_FILE",
         default=default_chat_history_file,
-        help=f"Specify the chat history file (default: {default_chat_history_file})",
+        help=
+        f"Specify the chat history file (default: {default_chat_history_file})",
     )
     group.add_argument(
         "--restore-chat-history",
@@ -261,7 +265,8 @@ def get_parser(default_config_files, git_root):
         "--llm-history-file",
         metavar="LLM_HISTORY_FILE",
         default=None,
-        help="Log the conversation with the LLM to this file (for example, .aider.llm.history)",
+        help=
+        "Log the conversation with the LLM to this file (for example, .aider.llm.history)",
     )
 
     ##########
@@ -269,13 +274,15 @@ def get_parser(default_config_files, git_root):
     group.add_argument(
         "--dark-mode",
         action="store_true",
-        help="Use colors suitable for a dark terminal background (default: False)",
+        help=
+        "Use colors suitable for a dark terminal background (default: False)",
         default=False,
     )
     group.add_argument(
         "--light-mode",
         action="store_true",
-        help="Use colors suitable for a light terminal background (default: False)",
+        help=
+        "Use colors suitable for a light terminal background (default: False)",
         default=False,
     )
     group.add_argument(
@@ -313,10 +320,9 @@ def get_parser(default_config_files, git_root):
     group.add_argument(
         "--code-theme",
         default="default",
-        help=(
-            "Set the markdown code theme (default: default, other options include monokai,"
-            " solarized-dark, solarized-light)"
-        ),
+        help=
+        ("Set the markdown code theme (default: default, other options include monokai,"
+         " solarized-dark, solarized-light)"),
     )
     group.add_argument(
         "--show-diffs",
@@ -339,14 +345,14 @@ def get_parser(default_config_files, git_root):
         default=True,
         help="Enable/disable adding .aider* to .gitignore (default: True)",
     )
-    default_aiderignore_file = (
-        os.path.join(git_root, ".aiderignore") if git_root else ".aiderignore"
-    )
+    default_aiderignore_file = (os.path.join(git_root, ".aiderignore")
+                                if git_root else ".aiderignore")
     group.add_argument(
         "--aiderignore",
         metavar="AIDERIGNORE",
         default=default_aiderignore_file,
-        help="Specify the aider ignore file (default: .aiderignore in git root)",
+        help=
+        "Specify the aider ignore file (default: .aiderignore in git root)",
     )
     group.add_argument(
         "--subtree-only",
@@ -370,19 +376,22 @@ def get_parser(default_config_files, git_root):
         "--attribute-author",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Attribute aider code changes in the git author name (default: True)",
+        help=
+        "Attribute aider code changes in the git author name (default: True)",
     )
     group.add_argument(
         "--attribute-committer",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Attribute aider commits in the git committer name (default: True)",
+        help=
+        "Attribute aider commits in the git committer name (default: True)",
     )
     group.add_argument(
         "--attribute-commit-message-author",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Prefix commit messages with 'aider: ' if aider authored the changes (default: False)",
+        help=
+        "Prefix commit messages with 'aider: ' if aider authored the changes (default: False)",
     )
     group.add_argument(
         "--attribute-commit-message-committer",
@@ -393,7 +402,8 @@ def get_parser(default_config_files, git_root):
     group.add_argument(
         "--commit",
         action="store_true",
-        help="Commit all pending changes with a suitable commit message, then exit",
+        help=
+        "Commit all pending changes with a suitable commit message, then exit",
         default=False,
     )
     group.add_argument(
@@ -417,10 +427,9 @@ def get_parser(default_config_files, git_root):
     group.add_argument(
         "--lint-cmd",
         action="append",
-        help=(
-            'Specify lint commands to run for different languages, eg: "python: flake8'
-            ' --select=..." (can be used multiple times)'
-        ),
+        help=
+        ('Specify lint commands to run for different languages, eg: "python: flake8'
+         ' --select=..." (can be used multiple times)'),
         default=[],
     )
     group.add_argument(
@@ -471,7 +480,8 @@ def get_parser(default_config_files, git_root):
         "--voice-language",
         metavar="VOICE_LANGUAGE",
         default="en",
-        help="Specify the language for voice using ISO 639-1 code (default: auto)",
+        help=
+        "Specify the language for voice using ISO 639-1 code (default: auto)",
     )
     group.add_argument(
         "--version",
@@ -494,7 +504,8 @@ def get_parser(default_config_files, git_root):
     group.add_argument(
         "--apply",
         metavar="FILE",
-        help="Apply the changes from the given file instead of running the chat (debug)",
+        help=
+        "Apply the changes from the given file instead of running the chat (debug)",
     )
     group.add_argument(
         "--yes",
@@ -524,7 +535,8 @@ def get_parser(default_config_files, git_root):
     group.add_argument(
         "--exit",
         action="store_true",
-        help="Do all startup activities then exit before accepting user input (debug)",
+        help=
+        "Do all startup activities then exit before accepting user input (debug)",
         default=False,
     )
     group.add_argument(
@@ -532,18 +544,17 @@ def get_parser(default_config_files, git_root):
         "--msg",
         "-m",
         metavar="COMMAND",
-        help=(
-            "Specify a single message to send the LLM, process reply then exit (disables chat mode)"
-        ),
+        help=
+        ("Specify a single message to send the LLM, process reply then exit (disables chat mode)"
+         ),
     )
     group.add_argument(
         "--message-file",
         "-f",
         metavar="MESSAGE_FILE",
-        help=(
-            "Specify a file containing the message to send the LLM, process reply, then exit"
-            " (disables chat mode)"
-        ),
+        help=
+        ("Specify a file containing the message to send the LLM, process reply, then exit"
+         " (disables chat mode)"),
     )
     group.add_argument(
         "--encoding",
@@ -555,10 +566,9 @@ def get_parser(default_config_files, git_root):
         "--config",
         is_config_file=True,
         metavar="CONFIG_FILE",
-        help=(
-            "Specify the config file (default: search for .aider.conf.yml in git root, cwd"
-            " or home directory)"
-        ),
+        help=
+        ("Specify the config file (default: search for .aider.conf.yml in git root, cwd"
+         " or home directory)"),
     )
     group.add_argument(
         "--gui",
@@ -566,6 +576,11 @@ def get_parser(default_config_files, git_root):
         action="store_true",
         help="Run aider in your browser",
         default=False,
+    )
+    group.add_argument(
+        "--api",
+        action="store_true",
+        help="Enable API mode",
     )
 
     return parser

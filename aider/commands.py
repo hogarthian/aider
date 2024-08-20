@@ -205,7 +205,10 @@ class Commands:
         elif first_word in matching_commands:
             return self.do_run(first_word[1:], rest_inp)
         elif len(matching_commands) > 1:
-            self.io.tool_error(f"Ambiguous command: {', '.join(matching_commands)}")
+            if self.io.api:
+                return f"Ambiguous command: {', '.join(matching_commands)}"
+            else:
+                self.io.tool_error(f"Ambiguous command: {', '.join(matching_commands)}")
         else:
             self.io.tool_error(f"Invalid command: {first_word}")
 
@@ -216,12 +219,18 @@ class Commands:
         "Commit edits to the repo made outside the chat (commit message optional)"
 
         if not self.coder.repo:
-            self.io.tool_error("No git repository found.")
-            return
+            if self.io.api:
+                return "No git repository found."
+            else:
+                self.io.tool_error("No git repository found.")
+                return
 
         if not self.coder.repo.is_dirty():
-            self.io.tool_error("No more changes to commit.")
-            return
+            if self.io.api:
+                return "No more changes to commit."
+            else:
+                self.io.tool_error("No more changes to commit.")
+                return
 
         commit_message = args.strip() if args else None
         self.coder.repo.commit(message=commit_message)
