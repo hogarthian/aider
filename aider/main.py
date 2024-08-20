@@ -19,7 +19,7 @@ from aider.llm import litellm  # noqa: F401; properly init litellm on launch
 from aider.repo import GitRepo
 from aider.versioncheck import check_version
 
-from .dump import dump  # noqa: F401
+from aider.dump import dump  # noqa: F401
 
 
 def get_git_root():
@@ -54,10 +54,13 @@ def setup_git(git_root, io):
     repo = None
     if git_root:
         repo = git.Repo(git_root)
-    elif io.confirm_ask("No git repo found, create one to track GPT's changes (recommended)?"):
+    elif io.confirm_ask(
+            "No git repo found, create one to track GPT's changes (recommended)?"
+    ):
         git_root = str(Path.cwd().resolve())
         repo = git.Repo.init(git_root)
-        io.tool_output("Git repository created in the current working directory.")
+        io.tool_output(
+            "Git repository created in the current working directory.")
         check_gitignore(git_root, io, False)
 
     if not repo:
@@ -81,10 +84,13 @@ def setup_git(git_root, io):
     with repo.config_writer() as git_config:
         if not user_name:
             git_config.set_value("user", "name", "Your Name")
-            io.tool_error('Update git name with: git config user.name "Your Name"')
+            io.tool_error(
+                'Update git name with: git config user.name "Your Name"')
         if not user_email:
             git_config.set_value("user", "email", "you@example.com")
-            io.tool_error('Update git email with: git config user.email "you@example.com"')
+            io.tool_error(
+                'Update git email with: git config user.email "you@example.com"'
+            )
 
     return repo.working_tree_dir
 
@@ -206,7 +212,7 @@ def parse_lint_cmds(lint_cmds, io):
         if re.match(r"^[a-z]+:.*", lint_cmd):
             pieces = lint_cmd.split(":")
             lang = pieces[0]
-            cmd = lint_cmd[len(lang) + 1 :]
+            cmd = lint_cmd[len(lang) + 1:]
             lang = lang.strip()
         else:
             lang = None
@@ -219,7 +225,8 @@ def parse_lint_cmds(lint_cmds, io):
         else:
             io.tool_error(f'Unable to parse --lint-cmd "{lint_cmd}"')
             io.tool_error('The arg should be "language: cmd --args ..."')
-            io.tool_error('For example: --lint-cmd "python: flake8 --select=E9"')
+            io.tool_error(
+                'For example: --lint-cmd "python: flake8 --select=E9"')
             err = True
     if err:
         return
@@ -251,8 +258,7 @@ def generate_search_path_list(default_fname, git_root, command_line_file):
 
 def register_models(git_root, model_settings_fname, io, verbose=False):
     model_settings_files = generate_search_path_list(
-        ".aider.model.settings.yml", git_root, model_settings_fname
-    )
+        ".aider.model.settings.yml", git_root, model_settings_fname)
 
     try:
         files_loaded = models.register_models(model_settings_files)
@@ -291,11 +297,11 @@ def load_dotenv_files(git_root, dotenv_fname):
 
 def register_litellm_models(git_root, model_metadata_fname, io, verbose=False):
     model_metatdata_files = generate_search_path_list(
-        ".aider.model.metadata.json", git_root, model_metadata_fname
-    )
+        ".aider.model.metadata.json", git_root, model_metadata_fname)
 
     try:
-        model_metadata_files_loaded = models.register_litellm_models(model_metatdata_files)
+        model_metadata_files_loaded = models.register_litellm_models(
+            model_metatdata_files)
         if len(model_metadata_files_loaded) > 0 and verbose:
             io.tool_output("Loaded model metadata from:")
             for model_metadata_file in model_metadata_files_loaded:
@@ -305,7 +311,11 @@ def register_litellm_models(git_root, model_metadata_fname, io, verbose=False):
         return 1
 
 
-def main(argv=None, input=None, output=None, force_git_root=None, return_coder=False):
+def main(argv=None,
+         input=None,
+         output=None,
+         force_git_root=None,
+         return_coder=False):
     if argv is None:
         argv = sys.argv[1:]
 
@@ -415,7 +425,8 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
                 git_dname = str(Path(all_files[0]).resolve())
                 fnames = []
             else:
-                io.tool_error(f"{all_files[0]} is a directory, but --no-git selected.")
+                io.tool_error(
+                    f"{all_files[0]} is a directory, but --no-git selected.")
                 return 1
 
     # We can't know the git repo for sure until after parsing the args.
@@ -424,10 +435,16 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
     if args.git and not force_git_root:
         right_repo_root = guessed_wrong_repo(io, git_root, fnames, git_dname)
         if right_repo_root:
-            return main(argv, input, output, right_repo_root, return_coder=return_coder)
+            return main(argv,
+                        input,
+                        output,
+                        right_repo_root,
+                        return_coder=return_coder)
 
     if args.just_check_update:
-        update_available = check_version(io, just_check=True, verbose=args.verbose)
+        update_available = check_version(io,
+                                         just_check=True,
+                                         verbose=args.verbose)
         return 0 if not update_available else 1
 
     if args.check_update:
@@ -464,8 +481,14 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
     if args.openai_organization_id:
         os.environ["OPENAI_ORGANIZATION"] = args.openai_organization_id
 
-    register_models(git_root, args.model_settings_file, io, verbose=args.verbose)
-    register_litellm_models(git_root, args.model_metadata_file, io, verbose=args.verbose)
+    register_models(git_root,
+                    args.model_settings_file,
+                    io,
+                    verbose=args.verbose)
+    register_litellm_models(git_root,
+                            args.model_metadata_file,
+                            io,
+                            verbose=args.verbose)
 
     if not args.model:
         args.model = "gpt-4o"
@@ -492,8 +515,10 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
                 models=main_model.commit_message_models(),
                 attribute_author=args.attribute_author,
                 attribute_committer=args.attribute_committer,
-                attribute_commit_message_author=args.attribute_commit_message_author,
-                attribute_commit_message_committer=args.attribute_commit_message_committer,
+                attribute_commit_message_author=args.
+                attribute_commit_message_author,
+                attribute_commit_message_committer=args.
+                attribute_commit_message_committer,
                 commit_prompt=args.commit_prompt,
                 subtree_only=args.subtree_only,
             )
@@ -592,15 +617,17 @@ def main(argv=None, input=None, output=None, force_git_root=None, return_coder=F
 
     if "VSCODE_GIT_IPC_HANDLE" in os.environ:
         args.pretty = False
-        io.tool_output("VSCode terminal detected, pretty output has been disabled.")
+        io.tool_output(
+            "VSCode terminal detected, pretty output has been disabled.")
 
-    io.tool_output('Use /help <question> for help, run "aider --help" to see cmd line args')
+    io.tool_output(
+        'Use /help <question> for help, run "aider --help" to see cmd line args'
+    )
 
     if git_root and Path.cwd().resolve() != Path(git_root).resolve():
         io.tool_error(
             "Note: in-chat filenames are always relative to the git working dir, not the current"
-            " working dir."
-        )
+            " working dir.")
 
         io.tool_error(f"Cur working dir: {Path.cwd()}")
         io.tool_error(f"Git working dir: {git_root}")
