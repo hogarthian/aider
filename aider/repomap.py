@@ -178,7 +178,8 @@ class RepoMap:
             return []
 
         cache_key = fname
-        if cache_key in self.TAGS_CACHE and self.TAGS_CACHE[cache_key]["mtime"] == file_mtime:
+        if cache_key in self.TAGS_CACHE and self.TAGS_CACHE[cache_key][
+                "mtime"] == file_mtime:
             return self.TAGS_CACHE[cache_key]["data"]
 
         # miss!
@@ -260,9 +261,12 @@ class RepoMap:
                 line=-1,
             )
 
-    def get_ranked_tags(
-        self, chat_fnames, other_fnames, mentioned_fnames, mentioned_idents, progress=None
-    ):
+    def get_ranked_tags(self,
+                        chat_fnames,
+                        other_fnames,
+                        mentioned_fnames,
+                        mentioned_idents,
+                        progress=None):
         import networkx as nx
 
         defines = defaultdict(set)
@@ -275,7 +279,6 @@ class RepoMap:
         chat_rel_fnames = set()
 
         fnames = sorted(fnames)
-
         # Default personalization for unspecified files is 1/num_nodes
         # https://networkx.org/documentation/stable/_modules/networkx/algorithms/link_analysis/pagerank_alg.html#pagerank
         personalize = 100 / len(fnames)
@@ -300,7 +303,9 @@ class RepoMap:
                             f"Repo-map can't include {fname}, it is not a normal file"
                         )
                     else:
-                        self.io.tool_error(f"Repo-map can't include {fname}, it no longer exists")
+                        self.io.tool_error(
+                            f"Repo-map can't include {fname}, it no longer exists"
+                        )
 
                 self.warned_files.add(fname)
                 continue
@@ -361,13 +366,17 @@ class RepoMap:
                     # scale down so high freq (low value) mentions don't dominate
                     num_refs = math.sqrt(num_refs)
 
-                    G.add_edge(referencer, definer, weight=mul * num_refs, ident=ident)
+                    G.add_edge(referencer,
+                               definer,
+                               weight=mul * num_refs,
+                               ident=ident)
 
         if not references:
             pass
 
         if personalization:
-            pers_args = dict(personalization=personalization, dangling=personalization)
+            pers_args = dict(personalization=personalization,
+                             dangling=personalization)
         else:
             pers_args = dict()
 
@@ -383,7 +392,9 @@ class RepoMap:
                 progress()
 
             src_rank = ranked[src]
-            total_weight = sum(data["weight"] for _src, _dst, data in G.out_edges(src, data=True))
+            total_weight = sum(
+                data["weight"]
+                for _src, _dst, data in G.out_edges(src, data=True))
             # dump(src, src_rank, total_weight)
             for _src, dst, data in G.out_edges(src, data=True):
                 data["rank"] = src_rank * data["weight"] / total_weight
@@ -391,7 +402,9 @@ class RepoMap:
                 ranked_definitions[(dst, ident)] += data["rank"]
 
         ranked_tags = []
-        ranked_definitions = sorted(ranked_definitions.items(), reverse=True, key=lambda x: x[1])
+        ranked_definitions = sorted(ranked_definitions.items(),
+                                    reverse=True,
+                                    key=lambda x: x[1])
 
         # dump(ranked_definitions)
 
@@ -401,19 +414,21 @@ class RepoMap:
                 continue
             ranked_tags += list(definitions.get((fname, ident), []))
 
-        rel_other_fnames_without_tags = set(self.get_rel_fname(fname) for fname in other_fnames)
+        rel_other_fnames_without_tags = set(
+            self.get_rel_fname(fname) for fname in other_fnames)
 
         fnames_already_included = set(rt[0] for rt in ranked_tags)
 
-        top_rank = sorted([(rank, node) for (node, rank) in ranked.items()], reverse=True)
+        top_rank = sorted([(rank, node) for (node, rank) in ranked.items()],
+                          reverse=True)
         for rank, fname in top_rank:
             if fname in rel_other_fnames_without_tags:
                 rel_other_fnames_without_tags.remove(fname)
             if fname not in fnames_already_included:
-                ranked_tags.append((fname,))
+                ranked_tags.append((fname, ))
 
         for fname in rel_other_fnames_without_tags:
-            ranked_tags.append((fname,))
+            ranked_tags.append((fname, ))
 
         return ranked_tags
 
@@ -450,9 +465,10 @@ class RepoMap:
 
         # If not in cache or force_refresh is True, generate the map
         start_time = time.time()
-        result = self.get_ranked_tags_map_uncached(
-            chat_fnames, other_fnames, max_map_tokens, mentioned_fnames, mentioned_idents
-        )
+        result = self.get_ranked_tags_map_uncached(chat_fnames, other_fnames,
+                                                   max_map_tokens,
+                                                   mentioned_fnames,
+                                                   mentioned_idents)
         end_time = time.time()
         self.map_processing_time = end_time - start_time
 
@@ -497,7 +513,8 @@ class RepoMap:
         best_tree = None
         best_tree_tokens = 0
 
-        chat_rel_fnames = set(self.get_rel_fname(fname) for fname in chat_fnames)
+        chat_rel_fnames = set(
+            self.get_rel_fname(fname) for fname in chat_fnames)
 
         self.tree_cache = dict()
 
@@ -512,7 +529,8 @@ class RepoMap:
 
             pct_err = abs(num_tokens - max_map_tokens) / max_map_tokens
             ok_err = 0.15
-            if (num_tokens <= max_map_tokens and num_tokens > best_tree_tokens) or pct_err < ok_err:
+            if (num_tokens <= max_map_tokens
+                    and num_tokens > best_tree_tokens) or pct_err < ok_err:
                 best_tree = tree
                 best_tree_tokens = num_tokens
 
@@ -538,10 +556,8 @@ class RepoMap:
         if key in self.tree_cache:
             return self.tree_cache[key]
 
-        if (
-            rel_fname not in self.tree_context_cache
-            or self.tree_context_cache[rel_fname]["mtime"] != mtime
-        ):
+        if (rel_fname not in self.tree_context_cache
+                or self.tree_context_cache[rel_fname]["mtime"] != mtime):
             code = self.io.read_text(abs_fname) or ""
             if not code.endswith("\n"):
                 code += "\n"
@@ -559,7 +575,10 @@ class RepoMap:
                 # header_max=30,
                 show_top_of_file_parent_scope=False,
             )
-            self.tree_context_cache[rel_fname] = {"context": context, "mtime": mtime}
+            self.tree_context_cache[rel_fname] = {
+                "context": context,
+                "mtime": mtime
+            }
 
         context = self.tree_context_cache[rel_fname]["context"]
         context.lines_of_interest = set()
@@ -579,7 +598,7 @@ class RepoMap:
         output = ""
 
         # add a bogus tag at the end so we trip the this_fname != cur_fname...
-        dummy_tag = (None,)
+        dummy_tag = (None, )
         for tag in sorted(tags) + [dummy_tag]:
             this_rel_fname = tag[0]
             if this_rel_fname in chat_rel_fnames:
@@ -629,9 +648,13 @@ def get_random_color():
 def get_scm_fname(lang):
     # Load the tags queries
     try:
-        return resources.files(__package__).joinpath("queries", f"tree-sitter-{lang}-tags.scm")
-    except KeyError:
-        return
+        return resources.files(__package__).joinpath(
+            "queries", f"tree-sitter-{lang}-tags.scm")
+    # for any error, return None
+    except:
+        # convert string f"queries/tree-sitter-{lang}-tags.scm" to a path
+        import pathlib
+        return pathlib.Path(f"queries/tree-sitter-{lang}-tags.scm")
 
 
 def get_supported_languages_md():
@@ -655,6 +678,8 @@ def get_supported_languages_md():
 
 
 if __name__ == "__main__":
+    from aider.io import InputOutput
+    from aider import models
     fnames = sys.argv[1:]
 
     chat_fnames = []
@@ -665,7 +690,9 @@ if __name__ == "__main__":
         else:
             chat_fnames.append(fname)
 
-    rm = RepoMap(root=".")
+    rm = RepoMap(root=".",
+                 io=InputOutput(),
+                 main_model=models.Model("gpt-4-1106-preview"))
     repo_map = rm.get_ranked_tags_map(chat_fnames, other_fnames)
 
     dump(len(repo_map))
