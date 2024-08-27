@@ -19,6 +19,9 @@ from tqdm import tqdm
 from aider.dump import dump
 from aider.utils import Spinner
 
+import configparser
+from neo4j import GraphDatabase
+
 # tree_sitter is throwing a FutureWarning
 warnings.simplefilter("ignore", category=FutureWarning)
 from tree_sitter_languages import get_language, get_parser  # noqa: E402
@@ -43,6 +46,7 @@ class RepoMap:
         max_context_window=None,
         map_mul_no_files=8,
         refresh="auto",
+        config_file="config.ini",
     ):
         self.io = io
         self.verbose = verbose
@@ -51,6 +55,11 @@ class RepoMap:
         if not root:
             root = os.getcwd()
         self.root = root
+
+        self.load_neo4j_config(config_file)
+        self.neo4j_driver = GraphDatabase.driver(self.neo4j_uri,
+                                                 auth=(self.neo4j_user,
+                                                       self.neo4j_password))
 
         self.load_tags_cache()
         self.cache_threshold = 0.95
@@ -68,6 +77,17 @@ class RepoMap:
         self.map_cache = {}
         self.map_processing_time = 0
         self.last_map = None
+
+    def __del__(self):
+        if hasattr(self, 'neo4j_driver'):
+            self.neo4j_driver.close()
+
+    def load_neo4j_config(self, config_file):
+        config = configparser.ConfigParser()
+        config.read(config_file)
+        self.neo4j_uri = config.get('neo4j', 'uri')
+        self.neo4j_user = config.get('neo4j', 'username')
+        self.neo4j_password = config.get('neo4j', 'password')
 
     def token_count(self, text):
         len_text = len(text)
@@ -171,7 +191,7 @@ class RepoMap:
         except FileNotFoundError:
             self.io.tool_error(f"File not found error: {fname}")
 
-    def get_tags(self, fname, rel_fname):
+    def get_tags_from_cache(self, fname, rel_fname):
         # Check if the file is in the cache and if the modification time has not changed
         file_mtime = self.get_mtime(fname)
         if file_mtime is None:
@@ -189,6 +209,27 @@ class RepoMap:
         self.TAGS_CACHE[cache_key] = {"mtime": file_mtime, "data": data}
         self.save_tags_cache()
         return data
+
+    def get_tags_from_neo4j(self, fname, rel_fname):
+        file_mtime = self.get_mtime(fname)
+        if file_mtime is None:
+            return []
+
+        stored_tags = self.get_tags_from_neo4j(rel_fname)
+
+        if stored_tags and stored_tags[0]['mtime'] == file_mtime:
+            return [Tag(**tag) for tag in stored_tags]
+
+        # If tags are not in Neo4j or outdated, generate new tags
+        data = list(self.get_tags_raw(fname, rel_fname))
+
+        # Update Neo4j with new tags
+        self.store_tags_in_neo4j(rel_fname, file_mtime, data)
+
+        return data
+
+    def get_tags(self, fname, rel_fname):
+        return self.get_tags_from_neo4j(fname, rel_fname)
 
     def get_tags_raw(self, fname, rel_fname):
         lang = filename_to_lang(fname)
@@ -269,110 +310,10 @@ class RepoMap:
                         progress=None):
         import networkx as nx
 
-        defines = defaultdict(set)
-        references = defaultdict(list)
-        definitions = defaultdict(set)
+        G = self.get_function_call_graph_from_neo4j()
 
-        personalization = dict()
-
-        fnames = set(chat_fnames).union(set(other_fnames))
-        chat_rel_fnames = set()
-
-        fnames = sorted(fnames)
-        # Default personalization for unspecified files is 1/num_nodes
-        # https://networkx.org/documentation/stable/_modules/networkx/algorithms/link_analysis/pagerank_alg.html#pagerank
-        personalize = 100 / len(fnames)
-
-        if len(fnames) - len(self.TAGS_CACHE) > 100:
-            self.io.tool_output(
-                "Initial repo scan can be slow in larger repos, but only happens once."
-            )
-            fnames = tqdm(fnames, desc="Scanning repo")
-            showing_bar = True
-        else:
-            showing_bar = False
-
-        for fname in fnames:
-            if progress and not showing_bar:
-                progress()
-
-            if not Path(fname).is_file():
-                if fname not in self.warned_files:
-                    if Path(fname).exists():
-                        self.io.tool_error(
-                            f"Repo-map can't include {fname}, it is not a normal file"
-                        )
-                    else:
-                        self.io.tool_error(
-                            f"Repo-map can't include {fname}, it no longer exists"
-                        )
-
-                self.warned_files.add(fname)
-                continue
-
-            # dump(fname)
-            rel_fname = self.get_rel_fname(fname)
-
-            if fname in chat_fnames:
-                personalization[rel_fname] = personalize
-                chat_rel_fnames.add(rel_fname)
-
-            if rel_fname in mentioned_fnames:
-                personalization[rel_fname] = personalize
-
-            tags = list(self.get_tags(fname, rel_fname))
-            if tags is None:
-                continue
-
-            for tag in tags:
-                if tag.kind == "def":
-                    defines[tag.name].add(rel_fname)
-                    key = (rel_fname, tag.name)
-                    definitions[key].add(tag)
-
-                elif tag.kind == "ref":
-                    references[tag.name].append(rel_fname)
-
-        ##
-        # dump(defines)
-        # dump(references)
-        # dump(personalization)
-
-        if not references:
-            references = dict((k, list(v)) for k, v in defines.items())
-
-        idents = set(defines.keys()).intersection(set(references.keys()))
-
-        G = nx.MultiDiGraph()
-
-        for ident in idents:
-            if progress:
-                progress()
-
-            definers = defines[ident]
-            if ident in mentioned_idents:
-                mul = 10
-            elif ident.startswith("_"):
-                mul = 0.1
-            else:
-                mul = 1
-
-            for referencer, num_refs in Counter(references[ident]).items():
-                for definer in definers:
-                    # dump(referencer, definer, num_refs, mul)
-                    # if referencer == definer:
-                    #    continue
-
-                    # scale down so high freq (low value) mentions don't dominate
-                    num_refs = math.sqrt(num_refs)
-
-                    G.add_edge(referencer,
-                               definer,
-                               weight=mul * num_refs,
-                               ident=ident)
-
-        if not references:
-            pass
+        personalization = self.get_personalization(chat_fnames, other_fnames,
+                                                   mentioned_fnames)
 
         if personalization:
             pers_args = dict(personalization=personalization,
@@ -385,50 +326,79 @@ class RepoMap:
         except ZeroDivisionError:
             return []
 
-        # distribute the rank from each source node, across all of its out edges
+        ranked_definitions = self.get_ranked_definitions(G, ranked)
+        ranked_tags = self.get_ranked_tags_from_definitions(
+            ranked_definitions, chat_fnames)
+
+        return ranked_tags
+
+    def get_function_call_graph_from_neo4j(self):
+        import networkx as nx
+
+        G = nx.MultiDiGraph()
+
+        with self.neo4j_driver.session() as session:
+            result = session.run(
+                "MATCH (caller:File)-[:HAS_TAG]->(callerTag:Tag)-[:CALLS]->(calleeTag:Tag)<-[:HAS_TAG]-(callee:File) "
+                "RETURN caller.rel_fname as caller_fname, callee.rel_fname as callee_fname, "
+                "callerTag.name as caller_name, calleeTag.name as callee_name, "
+                "callerTag.kind as caller_kind, calleeTag.kind as callee_kind")
+
+            for record in result:
+                G.add_edge(
+                    record['caller_fname'],
+                    record['callee_fname'],
+                    weight=
+                    1,  # You may want to adjust this based on your requirements
+                    ident=record['callee_name'])
+
+        return G
+
+    def get_personalization(self, chat_fnames, other_fnames, mentioned_fnames):
+        personalization = dict()
+        fnames = set(chat_fnames).union(set(other_fnames))
+        personalize = 100 / len(fnames)
+
+        for fname in fnames:
+            rel_fname = self.get_rel_fname(fname)
+            if fname in chat_fnames or rel_fname in mentioned_fnames:
+                personalization[rel_fname] = personalize
+
+        return personalization
+
+    def get_ranked_definitions(self, G, ranked):
         ranked_definitions = defaultdict(float)
         for src in G.nodes:
-            if progress:
-                progress()
-
             src_rank = ranked[src]
             total_weight = sum(
                 data["weight"]
                 for _src, _dst, data in G.out_edges(src, data=True))
-            # dump(src, src_rank, total_weight)
             for _src, dst, data in G.out_edges(src, data=True):
                 data["rank"] = src_rank * data["weight"] / total_weight
                 ident = data["ident"]
                 ranked_definitions[(dst, ident)] += data["rank"]
 
+        return sorted(ranked_definitions.items(),
+                      reverse=True,
+                      key=lambda x: x[1])
+
+    def get_ranked_tags_from_definitions(self, ranked_definitions,
+                                         chat_fnames):
         ranked_tags = []
-        ranked_definitions = sorted(ranked_definitions.items(),
-                                    reverse=True,
-                                    key=lambda x: x[1])
+        chat_rel_fnames = set(
+            self.get_rel_fname(fname) for fname in chat_fnames)
 
-        # dump(ranked_definitions)
-
-        for (fname, ident), rank in ranked_definitions:
-            # print(f"{rank:.03f} {fname} {ident}")
-            if fname in chat_rel_fnames:
-                continue
-            ranked_tags += list(definitions.get((fname, ident), []))
-
-        rel_other_fnames_without_tags = set(
-            self.get_rel_fname(fname) for fname in other_fnames)
-
-        fnames_already_included = set(rt[0] for rt in ranked_tags)
-
-        top_rank = sorted([(rank, node) for (node, rank) in ranked.items()],
-                          reverse=True)
-        for rank, fname in top_rank:
-            if fname in rel_other_fnames_without_tags:
-                rel_other_fnames_without_tags.remove(fname)
-            if fname not in fnames_already_included:
-                ranked_tags.append((fname, ))
-
-        for fname in rel_other_fnames_without_tags:
-            ranked_tags.append((fname, ))
+        with self.neo4j_driver.session() as session:
+            for (fname, ident), rank in ranked_definitions:
+                if fname in chat_rel_fnames:
+                    continue
+                result = session.run(
+                    "MATCH (f:File {rel_fname: $fname})-[:HAS_TAG]->(t:Tag {name: $ident}) "
+                    "RETURN f.rel_fname as rel_fname, t.name as name, t.kind as kind, t.line as line",
+                    fname=fname,
+                    ident=ident)
+                for record in result:
+                    ranked_tags.append(Tag(**record))
 
         return ranked_tags
 
@@ -695,5 +665,5 @@ if __name__ == "__main__":
                  main_model=models.Model("gpt-4-1106-preview"))
     repo_map = rm.get_ranked_tags_map(chat_fnames, other_fnames)
 
-    dump(len(repo_map))
+    # dump(len(repo_map))
     print(repo_map)
