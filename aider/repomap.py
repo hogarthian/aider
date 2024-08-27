@@ -60,7 +60,8 @@ class RepoMap:
         self.neo4j_driver = GraphDatabase.driver(self.neo4j_uri,
                                                  auth=(self.neo4j_user,
                                                        self.neo4j_password))
-
+        self.initialize_neo4j_schema()
+        self.create_calls_relationships()
         self.load_tags_cache()
         self.cache_threshold = 0.95
 
@@ -81,6 +82,175 @@ class RepoMap:
     def __del__(self):
         if hasattr(self, 'neo4j_driver'):
             self.neo4j_driver.close()
+
+    def initialize_neo4j_schema(self):
+        with self.neo4j_driver.session() as session:
+            # Create constraint for File nodes
+            session.run("""
+                CREATE CONSTRAINT IF NOT EXISTS FOR (f:File) REQUIRE f.rel_fname IS UNIQUE
+            """)
+
+            # Create composite index for Tag nodes (instead of Node Key constraint)
+            session.run("""
+                CREATE INDEX IF NOT EXISTS FOR (t:Tag) ON (t.name, t.kind, t.line)
+            """)
+
+            # Create index for Tag name
+            session.run("""
+                CREATE INDEX IF NOT EXISTS FOR (t:Tag) ON (t.name)
+            """)
+
+    def store_tags_in_neo4j(self, rel_fname, file_mtime, tags):
+        print(f"Storing tags in Neo4j for file: {rel_fname}")
+        with self.neo4j_driver.session() as session:
+            # Create or update the File node
+            session.run(
+                "MERGE (f:File {rel_fname: $rel_fname}) "
+                "SET f.mtime = $mtime",
+                rel_fname=rel_fname,
+                mtime=file_mtime)
+
+            print(f"Processing file: {rel_fname}")
+            print(f"Number of tags: {len(tags)}")
+
+            for tag in tags:
+                # Create or update the Tag node and create the HAS_TAG relationship
+                result = session.run("""
+                    MATCH (f:File {rel_fname: $rel_fname})
+                    MERGE (t:Tag {name: $name, kind: $kind, line: $line})
+                    MERGE (f)-[:HAS_TAG]->(t)
+                    RETURN f, t
+                    """,
+                                     rel_fname=rel_fname,
+                                     name=tag.name,
+                                     kind=tag.kind,
+                                     line=tag.line)
+
+                # Check if the relationship was created
+                record = result.single()
+                if record and record.get('f') and record.get('t'):
+                    print(f"Created HAS_TAG relationship for tag: {tag.name}")
+                else:
+                    print(
+                        f"Failed to create HAS_TAG relationship for tag: {tag.name}"
+                    )
+
+    def create_calls_relationships(self):
+        with self.neo4j_driver.session() as session:
+            session.run("""
+                MATCH (caller:Tag {kind: 'ref'})-[:HAS_TAG]-(f:File)
+                MATCH (callee:Tag {kind: 'def', name: caller.name})
+                WHERE callee <> caller
+                MERGE (caller)-[:CALLS]->(callee)
+            """)
+
+    def process_files(self, files):
+        print(f"Processing {len(files)} files")
+        for file in files:
+            rel_fname = self.get_rel_fname(file)
+            file_mtime = self.get_mtime(file)
+            tags = self.get_tags(file, rel_fname)
+            self.store_tags_in_neo4j(rel_fname, file_mtime, tags)
+
+        # After processing all files, create the CALLS relationships
+        self.create_calls_relationships()
+
+    def get_ranked_tags_map(
+        self,
+        chat_fnames,
+        other_fnames=None,
+        max_map_tokens=None,
+        mentioned_fnames=None,
+        mentioned_idents=None,
+        force_refresh=True,
+    ):
+        # Create a cache key
+        cache_key = (
+            tuple(sorted(chat_fnames)) if chat_fnames else None,
+            tuple(sorted(other_fnames)) if other_fnames else None,
+            max_map_tokens,
+        )
+
+        if not force_refresh:
+            if self.refresh == "manual" and self.last_map:
+                return self.last_map
+
+            if self.refresh == "always":
+                use_cache = False
+            elif self.refresh == "files":
+                use_cache = True
+            elif self.refresh == "auto":
+                use_cache = self.map_processing_time > 1.0
+
+            # Check if the result is in the cache
+            if use_cache and cache_key in self.map_cache:
+                return self.map_cache[cache_key]
+
+        # If not in cache or force_refresh is True, generate the map
+        start_time = time.time()
+
+        if force_refresh or self.refresh == "always":
+            # Process all files again
+            all_files = chat_fnames + (other_fnames or [])
+            self.process_files(all_files)
+
+        result = self.get_ranked_tags_map_uncached(chat_fnames, other_fnames,
+                                                   max_map_tokens,
+                                                   mentioned_fnames,
+                                                   mentioned_idents)
+        end_time = time.time()
+        self.map_processing_time = end_time - start_time
+
+        # Store the result in the cache
+        self.map_cache[cache_key] = result
+        self.last_map = result
+
+        return result
+
+    def get_function_call_graph_from_neo4j(self):
+        import networkx as nx
+
+        G = nx.MultiDiGraph()
+
+        with self.neo4j_driver.session() as session:
+            # First, get all files and tags
+            result = session.run("""
+                MATCH (f:File)-[:HAS_TAG]->(t:Tag)
+                RETURN f.rel_fname AS fname, t.name AS name, t.kind AS kind
+            """)
+
+            files_and_tags = [(record["fname"], record["name"], record["kind"])
+                              for record in result]
+
+            # Add all files as nodes
+            for fname, _, _ in set(
+                (fname, "", "") for fname, _, _ in files_and_tags):
+                G.add_node(fname)
+
+            # Then, find all potential calls
+            for caller_fname, caller_name, caller_kind in files_and_tags:
+                if caller_kind == 'ref':
+                    for callee_fname, callee_name, callee_kind in files_and_tags:
+                        if callee_kind == 'def' and caller_name == callee_name and caller_fname != callee_fname:
+                            G.add_edge(caller_fname,
+                                       callee_fname,
+                                       weight=1,
+                                       ident=caller_name)
+
+            # Optionally, if CALLS relationships exist, we can use them directly
+            result = session.run("""
+                MATCH (caller:File)-[:HAS_TAG]->(callerTag:Tag)-[:CALLS]->(calleeTag:Tag)<-[:HAS_TAG]-(callee:File)
+                RETURN caller.rel_fname AS caller_fname, callee.rel_fname AS callee_fname,
+                       callerTag.name AS name
+            """)
+
+            for record in result:
+                G.add_edge(record['caller_fname'],
+                           record['callee_fname'],
+                           weight=1,
+                           ident=record['name'])
+
+        return G
 
     def load_neo4j_config(self, config_file):
         config = configparser.ConfigParser()
@@ -215,18 +385,37 @@ class RepoMap:
         if file_mtime is None:
             return []
 
-        stored_tags = self.get_tags_from_neo4j(rel_fname)
+        with self.neo4j_driver.session() as session:
+            # Check if the file exists in the database and if its mtime is up to date
+            result = session.run("""
+                MATCH (f:File {rel_fname: $rel_fname})
+                RETURN f.mtime AS mtime
+                """,
+                                 rel_fname=rel_fname)
+            record = result.single()
 
-        if stored_tags and stored_tags[0]['mtime'] == file_mtime:
-            return [Tag(**tag) for tag in stored_tags]
+            if record and record['mtime'] == file_mtime:
+                # File exists and is up to date, retrieve its tags
+                result = session.run("""
+                    MATCH (f:File {rel_fname: $rel_fname})-[:HAS_TAG]->(t:Tag)
+                    RETURN t.name AS name, t.kind AS kind, t.line AS line
+                    """,
+                                     rel_fname=rel_fname)
+                return [
+                    Tag(rel_fname=rel_fname,
+                        fname=fname,
+                        name=record['name'],
+                        kind=record['kind'],
+                        line=record['line']) for record in result
+                ]
+            else:
+                # File doesn't exist or is outdated, generate new tags
+                tags = list(self.get_tags_raw(fname, rel_fname))
 
-        # If tags are not in Neo4j or outdated, generate new tags
-        data = list(self.get_tags_raw(fname, rel_fname))
+                # Store the new tags in Neo4j
+                self.store_tags_in_neo4j(rel_fname, file_mtime, tags)
 
-        # Update Neo4j with new tags
-        self.store_tags_in_neo4j(rel_fname, file_mtime, data)
-
-        return data
+                return tags
 
     def get_tags(self, fname, rel_fname):
         return self.get_tags_from_neo4j(fname, rel_fname)
@@ -401,52 +590,6 @@ class RepoMap:
                     ranked_tags.append(Tag(**record))
 
         return ranked_tags
-
-    def get_ranked_tags_map(
-        self,
-        chat_fnames,
-        other_fnames=None,
-        max_map_tokens=None,
-        mentioned_fnames=None,
-        mentioned_idents=None,
-        force_refresh=False,
-    ):
-        # Create a cache key
-        cache_key = (
-            tuple(sorted(chat_fnames)) if chat_fnames else None,
-            tuple(sorted(other_fnames)) if other_fnames else None,
-            max_map_tokens,
-        )
-
-        if not force_refresh:
-            if self.refresh == "manual" and self.last_map:
-                return self.last_map
-
-            if self.refresh == "always":
-                use_cache = False
-            elif self.refresh == "files":
-                use_cache = True
-            elif self.refresh == "auto":
-                use_cache = self.map_processing_time > 1.0
-
-            # Check if the result is in the cache
-            if use_cache and cache_key in self.map_cache:
-                return self.map_cache[cache_key]
-
-        # If not in cache or force_refresh is True, generate the map
-        start_time = time.time()
-        result = self.get_ranked_tags_map_uncached(chat_fnames, other_fnames,
-                                                   max_map_tokens,
-                                                   mentioned_fnames,
-                                                   mentioned_idents)
-        end_time = time.time()
-        self.map_processing_time = end_time - start_time
-
-        # Store the result in the cache
-        self.map_cache[cache_key] = result
-        self.last_map = result
-
-        return result
 
     def get_ranked_tags_map_uncached(
         self,
